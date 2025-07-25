@@ -21,14 +21,16 @@ import {
   getAcceptedRides,
   rejectRide,
   cancelRide,
-  getRideById
+  getRideById,
+  verifyOtp,
+  sendImage // Import the new sendImage controller
 } from '../controllers/usercontroller.js';
 import auth from '../middleware/auth.js';
-import upload from '../middleware/multer.js';
+import upload from '../middleware/multer.js'; // Assuming this handles file uploads
 
 const router = express.Router();
 
-router.post('/register/user', registerUserController); // <-- FIXED
+router.post('/register/user', registerUserController);
 router.get('/verify-email', verifyEmailController);
 router.post('/login', loginController);
 router.get('/logout', auth, logoutController);
@@ -47,6 +49,10 @@ router.get('/ride/history', auth, getRideHistory);
 router.put('/ride/complete', auth, completeRide);
 router.put('/ride/cancel/:rideId', auth, cancelRide);
 router.get('/ride/:rideId', auth, getRideById);
+router.post('/ride/verify-otp', auth, verifyOtp); // Route for OTP verification
+
+// NEW: Image sharing route
+router.post('/send-image', auth, upload.single('image'), sendImage); // Use 'image' as the field name for the file
 
 // Driver endpoints
 router.get('/driver/pending-rides', auth, getPendingRides);
