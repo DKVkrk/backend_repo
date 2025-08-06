@@ -1,10 +1,11 @@
+// routes/user.route.js
 import express from 'express';
 import {
   forgotPasswordController,
   loginController,
   logoutController,
   refreshToken,
-  registerUserController,
+  registerUserController, // General registration controller
   resetPasswordController,
   uploadAvatar,
   userDetails,
@@ -23,14 +24,17 @@ import {
   cancelRide,
   getRideById,
   verifyOtp,
-  sendImage // Import the new sendImage controller
+  sendImage,
+  googleAuthHandler // Import the new Google Auth controller
 } from '../controllers/usercontroller.js';
 import auth from '../middleware/auth.js';
-import upload from '../middleware/multer.js'; // Assuming this handles file uploads
+import upload from '../middleware/multer.js';
 
 const router = express.Router();
 
-router.post('/register/user', registerUserController);
+// General Registration (now handles both user and driver based on 'role' in body)
+router.post('/register', registerUserController); // Changed to a more general path
+
 router.get('/verify-email', verifyEmailController);
 router.post('/login', loginController);
 router.get('/logout', auth, logoutController);
@@ -43,18 +47,21 @@ router.get('/details', auth, userDetails);
 router.post('/driver/toggle-status', auth, toggleDriverOnlineStatus);
 router.get('/profile', auth, getUserProfile);
 
+// New Google Authentication Route
+router.post('/auth/google', googleAuthHandler); // This route will handle Google sign-in/sign-up for both roles
+
 // Ride endpoints
 router.post('/ride/request', auth, requestRide);
 router.get('/ride/history', auth, getRideHistory);
 router.put('/ride/complete', auth, completeRide);
 router.put('/ride/cancel/:rideId', auth, cancelRide);
 router.get('/ride/:rideId', auth, getRideById);
-router.post('/ride/verify-otp', auth, verifyOtp); // Route for OTP verification
+router.post('/ride/verify-otp', auth, verifyOtp);
 
-// NEW: Image sharing route
-router.post('/send-image', auth, upload.single('image'), sendImage); // Use 'image' as the field name for the file
+// Image sharing route
+router.post('/send-image', auth, upload.single('image'), sendImage);
 
-// Driver endpoints
+// Driver specific endpoints
 router.get('/driver/pending-rides', auth, getPendingRides);
 router.post('/driver/accept-ride', auth, acceptRide);
 router.post('/driver/reject-ride', auth, rejectRide);

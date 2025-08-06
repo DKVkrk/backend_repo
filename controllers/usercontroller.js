@@ -11,6 +11,12 @@ import forgotPasswordTemplate from '../utils/forgotPasswordTemplate.js';
 import jwt from 'jsonwebtoken';
 import { calculateDistance } from '../utils/geoUtils.js';
 
+
+import { OAuth2Client } from 'google-auth-library'; // Import Google Auth Library
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+
 /*
 |----------------------------------------------------------
 | Register (User / Driver with Role-based Control)
@@ -18,15 +24,31 @@ import { calculateDistance } from '../utils/geoUtils.js';
 */
 export async function registerUserController(request, response) {
   try {
-    const { name, email, password } = request.body;
+    console.log("Incoming registration data:", request.body); // Debug log
 
-    if (!name || !email || !password) {
-      return response.status(400).json({ message: "Provide name, email, and password", success: false, error: true });
+    const { name, email, password, role, licenseNumber, vehicleInfo } = request.body;
+
+    if (!name || !email || !password || !role) {
+      return response.status(400).json({ message: "Provide name, email, password, and role", success: false, error: true });
+    }
+
+    if (!['user', 'driver'].includes(role)) {
+      return response.status(400).json({ message: "Invalid role specified", success: false, error: true });
     }
 
     const existingUser = await UserModel.findOne({ email });
     if (existingUser) {
       return response.status(409).json({ message: "Email already registered", success: false, error: true });
+    }
+
+    // Driver-specific validation
+    if (role === 'driver') {
+      if (!licenseNumber) {
+        return response.status(400).json({ message: "License number required for driver", success: false, error: true });
+      }
+      if (!vehicleInfo) {
+        return response.status(400).json({ message: "Vehicle info required for driver", success: false, error: true });
+      }
     }
 
     const salt = await bcryptjs.genSalt(10);
@@ -36,10 +58,11 @@ export async function registerUserController(request, response) {
       name,
       email,
       password: hashPassword,
-      role: 'user',          // default role
-      license_number: null,
-      verify_license: null,
-      verify_email: false
+      role,
+      license_number: role === 'driver' ? licenseNumber : null,
+      vehicle_info: role === 'driver' ? vehicleInfo : null,
+      is_verified_driver: role === 'driver' ? false : null, // Drivers may need admin approval
+      verify_email: false // Still require email verification
     });
 
     const savedUser = await newUser.save();
@@ -51,8 +74,13 @@ export async function registerUserController(request, response) {
       html: verifyEmailTemplate({ name, url: verifyEmailUrl })
     });
 
+    let successMessage = "Registered successfully. Please verify your email.";
+    if (role === 'driver') {
+        successMessage += " Your account may require admin approval before going online.";
+    }
+
     return response.status(201).json({
-      message: "User registered successfully. Verify your email.",
+      message: successMessage,
       success: true,
       error: false,
       data: savedUser
@@ -62,6 +90,130 @@ export async function registerUserController(request, response) {
     return response.status(500).json({ message: error.message || error, success: false, error: true });
   }
 }
+
+
+/*
+|--------------------------------------------------------------------------
+| Google Authentication Handler
+|--------------------------------------------------------------------------
+*/
+export const googleAuthHandler = async (req, res) => {
+    try {
+        const { token, role } = req.body; // 'token' is Google's ID Token, 'role' is passed from frontend
+
+        if (!token) {
+            return res.status(400).json({ message: "Google ID Token missing", success: false, error: true });
+        }
+        if (!role || !['user', 'driver'].includes(role)) {
+            return res.status(400).json({ message: "Invalid or missing role for Google authentication", success: false, error: true });
+        }
+
+        // 1. Verify the ID Token with Google
+        const ticket = await client.verifyIdToken({
+            idToken: token,
+            audience: GOOGLE_CLIENT_ID,
+        });
+
+        const payload = ticket.getPayload();
+        const { sub: googleId, email, name, picture: avatar } = payload;
+
+        if (!email || !name) {
+            console.error("Google payload missing email or name:", payload);
+            return res.status(400).json({ message: "Invalid Google token payload (missing email/name)", success: false, error: true });
+        }
+
+        // 2. Check if user already exists in your database
+        let user = await UserModel.findOne({ email });
+
+        if (user) {
+            // User exists, check if their role matches the requested role
+            if (user.role !== role) {
+                return res.status(409).json({
+                    message: `Account already exists with email ${email} as a ${user.role}. Please log in using that role.`,
+                    success: false,
+                    error: true
+                });
+            }
+
+            // If user exists but not linked to Google, link it
+            if (!user.googleId) {
+                user.googleId = googleId;
+                await user.save();
+            }
+            console.log(`User ${email} found. Logging in via Google as ${role}.`);
+        } else {
+            // User does not exist, create a new user account
+            console.log(`User ${email} not found. Registering new user via Google as ${role}.`);
+
+            // For driver signups via Google, you might need additional fields.
+            // Here, we create a basic driver/user. A more advanced flow would ask for license/vehicle post-Google auth.
+            if (role === 'driver') {
+                // If a driver signs up via Google, they might not have license/vehicle info immediately.
+                // You might default these to null and require them to complete their profile later.
+                // Or you could make them register via regular form if those fields are mandatory from start.
+                console.warn(`Driver ${email} signed up via Google, but missing license/vehicle info. They must complete their profile.`);
+            }
+
+            const newUser = new UserModel({
+                name: name,
+                email: email,
+                password: null, // No password for Google authenticated users
+                avatar: avatar,
+                googleId: googleId,
+                role: role, // Use the role passed from the frontend (user or driver)
+                is_verified_driver: role === 'driver' ? false : null, // Drivers may need admin approval
+                verify_email: true, // Google verifies the email for us
+            });
+            user = await newUser.save();
+            console.log(`New user ${user._id} registered via Google as ${role}.`);
+        }
+
+        // 3. Generate your application's access and refresh tokens
+        const accesstoken = await generatedAccessToken(user._id);
+        const refreshToken = await genertedRefreshToken(user._id);
+
+        await UserModel.findByIdAndUpdate(user._id, {
+            last_login_date: new Date(),
+            refresh_token: refreshToken,
+        });
+
+        const cookiesOption = {
+            httpOnly: true,
+            secure: true,
+            sameSite: "None",
+        };
+        res.cookie('accessToken', accesstoken, cookiesOption);
+        res.cookie('refreshToken', refreshToken, cookiesOption);
+
+        return res.json({
+            message: "Google authentication successful",
+            success: true,
+            error: false,
+            data: {
+                accesstoken,
+                refreshToken,
+                user: {
+                    _id: user._id,
+                    email: user.email,
+                    role: user.role,
+                    name: user.name,
+                    avatar: user.avatar,
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error("🔥 Google Authentication Error:", error);
+        if (error.message.includes("Invalid ID Token") || error.message.includes("Audience mismatch")) {
+            return res.status(401).json({ message: "Google token verification failed. Please ensure correct Client ID.", success: false, error: true });
+        }
+        // Handle Mongoose duplicate key error specifically for GoogleId
+        if (error.code === 11000 && error.keyPattern && error.keyPattern.googleId) {
+             return res.status(409).json({ message: "This Google account is already linked to another user.", success: false, error: true });
+        }
+        return res.status(500).json({ message: error.message || "Google authentication failed due to server error", success: false, error: true, details: error.stack });
+    }
+};
 
 
 /*
