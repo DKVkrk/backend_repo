@@ -203,7 +203,7 @@ const server = http.createServer(app);
 
 // ✅ Load allowed origins from .env
 // Example in .env:
-// ALLOWED_ORIGINS=http://localhost:3000,https://fron-repo.vercel.app
+
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",").map(o => o.trim()) || [];
 
 app.use(cors({
