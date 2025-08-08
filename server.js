@@ -264,7 +264,112 @@ app.use((err, req, res, next) => {
     error: true
   });
 });
+io.on('connection', (socket) => {
+  console.log(`✅ WebSocket Connected: ${socket.id}`);
 
+  socket.on('registerUser', (userId) => {
+    app.locals.activeUsers.set(userId, socket.id);
+    console.log(`User ${userId} registered with socket ${socket.id}`);
+  });
+
+  socket.on('driverOnline', (driverId) => {
+    app.locals.activeUsers.set(driverId, socket.id);
+    socket.join('drivers');
+    console.log(`Driver ${driverId} is online`);
+  });
+
+  socket.on('updateDriverLocation', ({ driverId, location }) => {
+    app.locals.driverLocations.set(driverId, location);
+    console.log(`Driver ${driverId} location updated to: ${location.lat}, ${location.lng}`);
+  });
+
+  socket.on('driverOffline', (driverId) => {
+    socket.leave('drivers');
+    app.locals.activeUsers.delete(driverId);
+    app.locals.driverLocations.delete(driverId);
+    console.log(`Driver ${driverId} is offline`);
+  });
+
+  socket.on('newRideRequest', (rideData) => {
+    console.log(`New ride request from ${rideData.userId}`);
+
+    for (const [driverId, location] of app.locals.driverLocations.entries()) {
+      const distance = calculateDistance(
+        rideData.pickup_location.lat,
+        rideData.pickup_location.lng,
+        location.lat,
+        location.lng
+      );
+
+      if (distance <= 5) {
+        const driverSocketId = app.locals.activeUsers.get(driverId);
+        if (driverSocketId) {
+          app.locals.io.to(driverSocketId).emit('newRideAvailable', rideData);
+        }
+      }
+    }
+  });
+
+  socket.on('driverAcceptsRide', ({ rideId, driverId, userId, driverName, vehicleType, driverProfilePhoto }) => {
+    const riderSocketId = app.locals.activeUsers.get(userId);
+    if (riderSocketId) {
+      app.locals.io.to(riderSocketId).emit('rideAccepted', {
+        rideId,
+        driverId,
+        driverName,
+        vehicleType,
+        driverProfilePhoto,
+        message: "Your ride has been accepted!"
+      });
+    }
+    app.locals.io.to('drivers').emit('rideAcceptedByOther', { rideId });
+  });
+
+  socket.on('driverRejectsRide', ({ rideId, userId }) => {
+    const riderSocketId = app.locals.activeUsers.get(userId);
+    if (riderSocketId) {
+      app.locals.io.to(riderSocketId).emit('rideRejected', {
+        rideId,
+        message: "Driver couldn't accept your ride. Searching for another driver..."
+      });
+    }
+  });
+
+  socket.on('driverReachedRider', ({ riderId, rideId }) => {
+    const riderSocketId = app.locals.activeUsers.get(riderId);
+    if (riderSocketId) {
+      app.locals.io.to(riderSocketId).emit('driverReachedRider', { riderId, rideId });
+    }
+  });
+
+  socket.on('rideCompleted', ({ userId, rideId }) => {
+    const riderSocketId = app.locals.activeUsers.get(userId);
+    if (riderSocketId) {
+      app.locals.io.to(riderSocketId).emit('rideCompleted', { rideId, userId });
+    }
+  });
+
+  socket.on('riderCancelledRide', ({ rideId, driverId }) => {
+    const driverSocketId = app.locals.activeUsers.get(driverId);
+    if (driverSocketId) {
+      app.locals.io.to(driverSocketId).emit('rideCancelled', { rideId });
+    }
+  });
+
+  socket.on('disconnect', () => {
+    console.log(`❌ WebSocket Disconnected: ${socket.id}`);
+    for (const [userId, sockId] of app.locals.activeUsers.entries()) {
+      if (sockId === socket.id) {
+        app.locals.activeUsers.delete(userId);
+        if (app.locals.driverLocations.has(userId)) {
+          app.locals.driverLocations.delete(userId);
+          socket.leave('drivers');
+        }
+        break;
+      }
+    }
+  });
+});
 const PORT = process.env.PORT || 8000;
 
 connectDB().then(() => {
