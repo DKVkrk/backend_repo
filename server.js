@@ -201,15 +201,13 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-// ✅ Allow multiple origins for CORS
-const allowedOrigins = [
-  "http://localhost:3000",
-  "https://fron-repo-nbkujw78h-devesh-kumar-singhs-projects.vercel.app" // Your Vercel frontend
-];
+// ✅ Load allowed origins from .env
+// Example in .env:
+// ALLOWED_ORIGINS=http://localhost:3000,https://fron-repo.vercel.app
+const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",").map(o => o.trim()) || [];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
     if (!origin || allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
@@ -227,7 +225,7 @@ app.use(helmet({
   crossOriginResourcePolicy: false
 }));
 
-// ✅ Socket.IO CORS setup to match Express
+// ✅ Socket.IO CORS setup matches Express
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
@@ -247,7 +245,7 @@ app.locals.driverLocations = new Map();
 app.use('/api/user', userRouter);
 app.post('/api/user/payment/webhook', express.raw({ type: 'application/json' }), userRouter);
 
-// Socket.IO events...
+// Socket.IO authentication
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) {
@@ -256,8 +254,9 @@ io.use((socket, next) => {
   next();
 });
 
-// Your socket events remain the same...
+// Your socket events...
 
+// Error handler
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
   res.status(500).json({
