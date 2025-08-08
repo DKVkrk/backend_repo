@@ -1,11 +1,10 @@
-// routes/user.route.js
 import express from 'express';
 import {
   forgotPasswordController,
   loginController,
   logoutController,
   refreshToken,
-  registerUserController, // General registration controller
+  registerUserController,
   resetPasswordController,
   uploadAvatar,
   userDetails,
@@ -25,16 +24,14 @@ import {
   getRideById,
   verifyOtp,
   sendImage,
-  googleAuthHandler // Import the new Google Auth controller
+  googleAuthHandler
 } from '../controllers/usercontroller.js';
 import auth from '../middleware/auth.js';
 import upload from '../middleware/multer.js';
 
 const router = express.Router();
 
-// General Registration (now handles both user and driver based on 'role' in body)
-router.post('/register', registerUserController); // Changed to a more general path
-
+router.post('/register', registerUserController);
 router.get('/verify-email', verifyEmailController);
 router.post('/login', loginController);
 router.get('/logout', auth, logoutController);
@@ -47,21 +44,16 @@ router.get('/details', auth, userDetails);
 router.post('/driver/toggle-status', auth, toggleDriverOnlineStatus);
 router.get('/profile', auth, getUserProfile);
 
-// New Google Authentication Route
-router.post('/auth/google', googleAuthHandler); // This route will handle Google sign-in/sign-up for both roles
+router.post('/auth/google', googleAuthHandler);
 
-// Ride endpoints
 router.post('/ride/request', auth, requestRide);
 router.get('/ride/history', auth, getRideHistory);
 router.put('/ride/complete', auth, completeRide);
 router.put('/ride/cancel/:rideId', auth, cancelRide);
 router.get('/ride/:rideId', auth, getRideById);
 router.post('/ride/verify-otp', auth, verifyOtp);
-
-// Image sharing route
 router.post('/send-image', auth, upload.single('image'), sendImage);
 
-// Driver specific endpoints
 router.get('/driver/pending-rides', auth, getPendingRides);
 router.post('/driver/accept-ride', auth, acceptRide);
 router.post('/driver/reject-ride', auth, rejectRide);
