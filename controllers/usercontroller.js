@@ -26,54 +26,88 @@ const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 export async function registerUserController(request, response) {
   try {
     let { name, email, password } = request.body;
+
     if (!name || !email || !password) {
-      return response.status(400).json({ message: "Provide name, email, and password", success: false, error: true });
-    }
-    email = email.trim().toLowerCase();
-    console.log("Incoming registration:", { name, email });
-    const existingUser = await UserModel.findOne({ email });
-    console.log("Existing user found:", existingUser);
-    if (existingUser) {
-      return response.status(409).json({ message: "Email already registered", success: false, error: true });
+      return response.status(400).json({
+        message: "Provide name, email, and password",
+        success: false,
+        error: true,
+      });
     }
 
+    email = email.trim().toLowerCase();
+    console.log("Incoming registration:", { name, email });
+
+    const existingUser = await UserModel.findOne({ email });
+    console.log("Existing user found:", existingUser);
+
+    if (existingUser) {
+      return response.status(409).json({
+        message: "Email already registered",
+        success: false,
+        error: true,
+      });
+    }
+
+    // hash password
     const salt = await bcryptjs.genSalt(10);
     const hashPassword = await bcryptjs.hash(password, salt);
 
+    // create new user (not saved yet)
     const newUser = new UserModel({
       name,
       email,
       password: hashPassword,
-      role: 'user',
+      role: "user",
       license_number: null,
       verify_license: null,
-      verify_email: false
+      verify_email: false,
     });
 
-    // Prepare verification email URL using newUser._id (not saved yet, but _id is generated)
-    const verifyEmailUrl = `${process.env.FRONTEND_URL}verify-email?code=${newUser._id}`;
-    await sendEmail({
-      sendTo: email,
-      subject: "Verify your email - Rilo",
-      html: verifyEmailTemplate({ name, url: verifyEmailUrl })
-    });
+    // build verify email URL
+    const frontendUrl = process.env.FRONTEND_URL.replace(/\/$/, ""); // remove trailing slash
+    const verifyEmailUrl = `${frontendUrl}/verify-email?code=${newUser._id}`;
 
-    // Only save user if email sent successfully
+    // try sending email
+    try {
+      await sendEmail({
+        sendTo: email,
+        subject: "Verify your email - Rilo",
+        html: verifyEmailTemplate({ name, url: verifyEmailUrl }),
+      });
+    } catch (emailErr) {
+      console.error("❌ Email sending failed:", emailErr.message);
+      return response.status(500).json({
+        message: "Failed to send verification email. Please try again later.",
+        success: false,
+        error: true,
+      });
+    }
+
+    // save user only if email sent
     const savedUser = await newUser.save();
-    console.log("User saved:", savedUser);
+    console.log("✅ User saved:", savedUser);
 
     return response.status(201).json({
       message: "User registered successfully. Verify your email.",
       success: true,
       error: false,
-      data: savedUser
+      data: savedUser,
     });
   } catch (error) {
     if (error.code === 11000 && error.keyPattern && error.keyPattern.email) {
-      return response.status(409).json({ message: "Email already registered (MongoDB index)", success: false, error: true });
+      return response.status(409).json({
+        message: "Email already registered (MongoDB index)",
+        success: false,
+        error: true,
+      });
     }
     console.error("🔥 Registration Error:", error);
-    return response.status(500).json({ message: error.message || error, success: false, error: true });
+    return response.status(500).json({
+      message: error.message || error,
+      success: false,
+      error: true,
+    });
   }
 }
 
