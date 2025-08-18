@@ -22,33 +22,19 @@ const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 | Register (User / Driver with Role-based Control)
 |----------------------------------------------------------
 */
+// ...existing code...
 export async function registerUserController(request, response) {
   try {
-    console.log("Incoming registration data:", request.body); // Debug log
-
-    const { name, email, password, role, licenseNumber, vehicleInfo } = request.body;
-
-    if (!name || !email || !password || !role) {
-      return response.status(400).json({ message: "Provide name, email, password, and role", success: false, error: true });
+    let { name, email, password } = request.body;
+    if (!name || !email || !password) {
+      return response.status(400).json({ message: "Provide name, email, and password", success: false, error: true });
     }
-
-    if (!['user', 'driver'].includes(role)) {
-      return response.status(400).json({ message: "Invalid role specified", success: false, error: true });
-    }
-
+    email = email.trim().toLowerCase();
+    console.log("Incoming registration:", { name, email });
     const existingUser = await UserModel.findOne({ email });
+    console.log("Existing user found:", existingUser);
     if (existingUser) {
       return response.status(409).json({ message: "Email already registered", success: false, error: true });
-    }
-
-    // Driver-specific validation
-    if (role === 'driver') {
-      if (!licenseNumber) {
-        return response.status(400).json({ message: "License number required for driver", success: false, error: true });
-      }
-      if (!vehicleInfo) {
-        return response.status(400).json({ message: "Vehicle info required for driver", success: false, error: true });
-      }
     }
 
     const salt = await bcryptjs.genSalt(10);
@@ -58,38 +44,39 @@ export async function registerUserController(request, response) {
       name,
       email,
       password: hashPassword,
-      role,
-      license_number: role === 'driver' ? licenseNumber : null,
-      vehicle_info: role === 'driver' ? vehicleInfo : null,
-      is_verified_driver: role === 'driver' ? false : null, // Drivers may need admin approval
-      verify_email: false // Still require email verification
+      role: 'user',
+      license_number: null,
+      verify_license: null,
+      verify_email: false
     });
 
-    const savedUser = await newUser.save();
-
-    const verifyEmailUrl = `${process.env.FRONTEND_URL}/verify-email?code=${savedUser._id}`;
+    // Prepare verification email URL using newUser._id (not saved yet, but _id is generated)
+    const verifyEmailUrl = `${process.env.FRONTEND_URL}verify-email?code=${newUser._id}`;
     await sendEmail({
       sendTo: email,
       subject: "Verify your email - Rilo",
       html: verifyEmailTemplate({ name, url: verifyEmailUrl })
     });
 
-    let successMessage = "Registered successfully. Please verify your email.";
-    if (role === 'driver') {
-        successMessage += " Your account may require admin approval before going online.";
-    }
+    // Only save user if email sent successfully
+    const savedUser = await newUser.save();
+    console.log("User saved:", savedUser);
 
     return response.status(201).json({
-      message: successMessage,
+      message: "User registered successfully. Verify your email.",
       success: true,
       error: false,
       data: savedUser
     });
   } catch (error) {
+    if (error.code === 11000 && error.keyPattern && error.keyPattern.email) {
+      return response.status(409).json({ message: "Email already registered (MongoDB index)", success: false, error: true });
+    }
     console.error("🔥 Registration Error:", error);
     return response.status(500).json({ message: error.message || error, success: false, error: true });
   }
 }
+
 
 
 /*

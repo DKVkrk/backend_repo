@@ -68,7 +68,7 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      default: null // Password can be null if signing up with Google
+      default: null
     },
     avatar: {
       type: String,
@@ -126,15 +126,15 @@ const userSchema = new mongoose.Schema(
       enum: ["admin", "user", "driver"],
       default: "user"
     },
-    vehicle_info: { // Vehicle details for drivers
+    vehicle_info: {
       type: String,
       default: null
     },
-    license_number: { // Driving license number for drivers
+    license_number: {
       type: String,
       default: null
     },
-    is_verified_driver: { // For optional admin verification of driver documents
+    is_verified_driver: {
       type: Boolean,
       default: false
     },
@@ -142,17 +142,25 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
-    googleId: { // New field for Google's unique user ID (sub)
-        type: String,
-        default: null,
-        unique: true, // Ensure each Google ID is unique
-        sparse: true // Allows multiple documents to have null values, but unique for non-nulls
+    googleId: {
+      type: String,
+      default: null,
+      unique: true,
+      sparse: true
     }
   },
   {
     timestamps: true
   }
 );
+
+// Mongoose middleware to lowercase the email before saving
+userSchema.pre('save', function (next) {
+  if (this.email) {
+    this.email = this.email.toLowerCase();
+  }
+  next();
+});
 
 const UserModel = mongoose.model("User", userSchema);
 export default UserModel;
